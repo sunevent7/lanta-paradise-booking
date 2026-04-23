@@ -6,67 +6,71 @@ export default function BookingTimeline() {
   const [rooms, setRooms] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [expandedGroups, setExpandedGroups] = useState({});
-  
   const [isModalOpen, setIsModalOpen] = useState(false);
+
+  // --- State สำหรับดูและลบข้อมูลลูกค้า ---
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [selectedBooking, setSelectedBooking] = useState(null);
 
+  // การลากเมาส์บนตาราง
   const [isSelecting, setIsSelecting] = useState(false);
   const [selection, setSelection] = useState({ roomId: null, startDay: null, endDay: null });
 
-  const [newBooking, setNewBooking] = useState({ room_id: '', customer_name: '', price: 0, check_in: '', check_out: '', note: '', status: 'booked' });
+  // ข้อมูลใน Modal
+  const [customerName, setCustomerName] = useState('');
+  const [selectedRooms, setSelectedRooms] = useState([]);
 
-  const columnWidth = 60;
-  const sidebarWidth = 200;
-  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth()); // 0 = ม.ค.
+  const [currentMonth, setCurrentMonth] = useState(new Date().getMonth());
   const [currentYear, setCurrentYear] = useState(2026);
-
-  const monthNames = [
-  "January", "February", "March", "April", "May", "June",
-  "July", "August", "September", "October", "November", "December"
-  ];
-
-// ฟังก์ชันหาจำนวนวันในเดือนนั้นๆ
+  const monthNames = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
   const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
   const days = Array.from({ length: daysInMonth }, (_, i) => i + 1);
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { fetchData(); }, [currentMonth]);
 
   async function fetchData() {
     const { data: r } = await supabase.from('rooms').select('*').order('room_no');
     const { data: b } = await supabase.from('bookings').select('*');
     setRooms(r || []);
     setBookings(b || []);
+    
+    // จัดกลุ่ม Room Type
     const types = [...new Set(r?.map(room => room.room_type?.trim().toUpperCase()))];
     const initialStatus = {};
-    types.forEach(t => initialStatus[t] = true);
-    setExpandedGroups(initialStatus);
+    types.forEach(t => {
+        if (expandedGroups[t] === undefined) initialStatus[t] = true;
+    });
+    setExpandedGroups(prev => ({ ...initialStatus, ...prev }));
   }
 
-  // ฟังก์ชันคำนวณจำนวนคืน
-  const getNights = (checkIn, checkOut) => {
-    const start = new Date(checkIn);
-    const end = new Date(checkOut);
-    const diffTime = Math.abs(end - start);
-    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
-    return diffDays || 1;
-  };
-
-  const handleSaveBooking = async () => {
-    const { error } = await supabase.from('bookings').insert([newBooking]);
-    if (error) alert("Error: " + error.message);
-    else { setIsModalOpen(false); fetchData(); }
+  const handleBookingClick = (booking, e) => {
+    e.stopPropagation();
+    setSelectedBooking(booking);
+    setIsDetailOpen(true);
   };
 
   const handleCheckIn = async (id) => {
-    await supabase.from('bookings').update({ status: 'checked_in' }).eq('id', id);
-    setIsDetailOpen(false);
-    fetchData();
+    const { error } = await supabase
+      .from('bookings')
+      .update({ status: 'checked_in' })
+      .eq('id', id);
+
+    if (error) {
+      alert("เช็คอินไม่สำเร็จครับพี่: " + error.message);
+    } else {
+      setIsDetailOpen(false);
+      fetchData();
+    }
   };
 
-  const handleDelete = async (id) => {
-    if (confirm("ยืนยันการลบการจอง?")) {
-      await supabase.from('bookings').delete().eq('id', id);
+  const handleDeleteBooking = async (id) => {
+    const confirmDelete = confirm("พี่เจแน่ใจนะครับว่าจะลบรายการนี้?");
+    if (!confirmDelete) return;
+
+    const { error } = await supabase.from('bookings').delete().eq('id', id);
+    if (error) {
+      alert("ลบไม่ได้ครับพี่: " + error.message);
+    } else {
       setIsDetailOpen(false);
       fetchData();
     }
@@ -82,191 +86,296 @@ export default function BookingTimeline() {
   };
 
   const handleMouseUp = () => {
-  if (isSelecting) {
-    const start = Math.min(selection.startDay, selection.endDay);
-    const end = Math.max(selection.startDay, selection.endDay);
-    
-    // ใช้ currentYear และ currentMonth แทนค่าคงที่
-    const checkInDate = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(start).padStart(2, '0')}`;
-    const checkOutDate = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(end + 1).padStart(2, '0')}`; 
+    if (isSelecting) {
+      const start = Math.min(selection.startDay, selection.endDay);
+      const end = Math.max(selection.startDay, selection.endDay);
+      const checkIn = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(start).padStart(2, '0')}`;
+      const checkOut = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-${String(end + 1).padStart(2, '0')}`;
+      const room = rooms.find(r => r.id === selection.roomId);
+      
+      setSelectedRooms([{
+        id: Date.now(),
+        actual_room_id: room.id,
+        room_no: room.room_no,
+        check_in: checkIn,
+        check_out: checkOut,
+        price: 0
+      }]);
+      setIsModalOpen(true);
+      setIsSelecting(false);
+    }
+  };
 
-    setNewBooking({
-      ...newBooking,
-      room_id: selection.roomId,
-      check_in: checkInDate,
-      check_out: checkOutDate,
-    });
-    setIsModalOpen(true);
-    setIsSelecting(false);
-  }
-};
+  const addExtraRoom = () => {
+    const first = selectedRooms[0];
+    setSelectedRooms([...selectedRooms, {
+      id: Date.now(),
+      actual_room_id: '',
+      room_no: '',
+      check_in: first?.check_in || '',
+      check_out: first?.check_out || '',
+      price: 0
+    }]);
+  };
 
-  const roomTypes = [...new Set(rooms.map(r => r.room_type?.trim().toUpperCase()))];
+  const updateRoomRow = (id, field, value) => {
+    setSelectedRooms(selectedRooms.map(r => {
+      if (r.id === id) {
+        if (field === 'actual_room_id') {
+          const roomInfo = rooms.find(item => item.id === value);
+          return { ...r, actual_room_id: value, room_no: roomInfo?.room_no || '' };
+        }
+        return { ...r, [field]: value };
+      }
+      return r;
+    }));
+  };
 
-  return (
-    <div className="p-6 bg-[#121212] min-h-screen text-white select-none font-sans" onMouseUp={handleMouseUp}>
-      <header className="mb-6 flex justify-between items-center">
-  <h1 className="text-2xl font-bold tracking-tighter text-gray-200 uppercase">
-    Lanta <span className="text-red-700 text-3xl">Paradise</span>
-  </h1>
+  const handleSaveBooking = async () => {
+    if (!customerName) return alert("ใส่ชื่อลูกค้าด้วยครับพี่เจ");
+    if (selectedRooms.some(r => !r.actual_room_id)) return alert("เลือกห้องให้ครบทุกบรรทัดด้วยครับ");
+
+    const toSave = selectedRooms.map(r => ({
+      customer_name: customerName,
+      room_id: r.actual_room_id,
+      check_in: r.check_in,
+      check_out: r.check_out,
+      price: Number(r.price) || 0,
+      status: 'booked'
+    }));
+
+    const { error } = await supabase.from('bookings').insert(toSave);
+    if (error) alert(error.message);
+    else {
+      setIsModalOpen(false);
+      setCustomerName('');
+      fetchData();
+    }
+  };
+
+  const groupedRooms = rooms.reduce((acc, room) => {
+    const type = room.room_type?.trim().toUpperCase() || 'OTHER';
+    if (!acc[type]) acc[type] = [];
+    acc[type].push(room);
+    return acc;
+  }, {});
   
-  <div className="flex items-center gap-4 bg-white/5 p-1 rounded-full border border-white/10">
-    <button 
-      onClick={() => setCurrentMonth(prev => prev === 0 ? 11 : prev - 1)}
-      className="p-2 hover:bg-white/10 rounded-full transition-colors">◀</button>
-    
-    <div className="text-xs font-black w-32 text-center uppercase tracking-widest">
-      {monthNames[currentMonth]} {currentYear}
-    </div>
-    
-    <button 
-      onClick={() => setCurrentMonth(prev => prev === 11 ? 0 : prev + 1)}
-      className="p-2 hover:bg-white/10 rounded-full transition-colors">▶</button>
-  </div>
-</header>
-
-      <div className="overflow-x-auto border border-gray-800 rounded-3xl bg-[#1a1a1a] shadow-2xl relative">
-        <div className="flex bg-[#1f1f1f] border-b border-gray-800 sticky top-0 z-[30]">
-          <div className="w-[200px] min-w-[200px] p-4 font-black border-r border-gray-800 bg-[#1f1f1f] sticky left-0 z-[31] text-[10px] text-gray-500 tracking-widest uppercase">ROOMS LIST</div>
-          {days.map(day => (
-            <div key={day} className="w-[60px] min-w-[60px] p-3 text-center border-r border-gray-800/50 text-[14px] font-mono text-gray-600">{day}</div>
-          ))}
+  return (
+    <div className="p-6 bg-[#0c0c0c] min-h-screen text-white font-sans selection:bg-red-600 selection:text-white" onMouseUp={handleMouseUp}>
+      
+      {/* Header */}
+      <header className="mb-8 flex justify-between items-center border-b border-white/5 pb-6">
+        <h1 className="text-4xl font-black italic uppercase tracking-tighter">LANTA <span className="text-red-600">PARADISE</span></h1>
+        <div className="flex items-center gap-4 bg-[#1a1a1a] p-1 rounded-2xl border border-white/10 shadow-2xl">
+           <button onClick={() => setCurrentMonth(p => p === 0 ? 11 : p-1)} className="p-3 hover:text-red-500 transition-colors font-bold text-xl">◀</button>
+           <span className="font-mono text-lg font-black uppercase tracking-widest px-4">{monthNames[currentMonth]} {currentYear}</span>
+           <button onClick={() => setCurrentMonth(p => p === 11 ? 0 : p+1)} className="p-3 hover:text-red-500 transition-colors font-bold text-xl">▶</button>
         </div>
+      </header>
 
-        {roomTypes.map(type => (
-          <div key={type} className="relative">
-            <div 
-              onClick={() => setExpandedGroups(p => ({ ...p, [type]: !p[type] }))}
-              className="bg-[#222] p-2 pl-4 flex items-center cursor-pointer hover:bg-[#282828] sticky left-0 z-[25] border-b border-gray-800"
-            >
-              <span className="mr-3 text-[14px] text-red-500">{expandedGroups[type] ? '▼' : '▶'}</span>
-              <span className="text-[14px] font-black uppercase tracking-[0.2em] text-blue-400">{type}</span>
-            </div>
-
-            {/* ค้นหาห้องและวาดตาราง */}
-{expandedGroups[type] && rooms.filter(r => r.room_type?.trim().toUpperCase() === type).map(room => (
-  <div key={room.id} className="flex border-b border-gray-800/50 relative h-14 group">
-    {/* ชื่อห้อง */}
-    <div className="w-[200px] min-w-[200px] p-4 pl-8 border-r border-gray-800 bg-[#181818] sticky left-0 z-[20] text-[16px] font-bold text-gray-500 group-hover:text-white flex items-center uppercase">
-      {room.room_no}
-    </div>
-
-    {/* ช่องตารางวัน (สร้างตามจำนวนวันในเดือนนั้นๆ) */}
-    {days.map(day => {
-      const isSelected = isSelecting && selection.roomId === room.id && 
-        day >= Math.min(selection.startDay, selection.endDay) && 
-        day <= Math.max(selection.startDay, selection.endDay);
-      return (
-        <div 
-          key={day} 
-          onMouseDown={() => handleMouseDown(room.id, day)} 
-          onMouseEnter={() => handleMouseEnter(day)}
-          className={`w-[60px] min-w-[60px] border-r border-gray-800/30 transition-colors cursor-cell ${isSelected ? 'bg-orange-500/20' : 'group-hover:bg-white/[0.02]'}`}
-        />
-      );
-    })}
-
-    {/* แถบสีการจอง (กรองเฉพาะเดือนและปีที่เลือก) */}
-    {bookings.filter(b => {
-      const checkInDate = new Date(b.check_in);
-      return b.room_id === room.id && 
-             checkInDate.getMonth() === currentMonth && 
-             checkInDate.getFullYear() === currentYear;
-    }).map(booking => {
-      const bIn = new Date(booking.check_in);
-      const bOut = new Date(booking.check_out);
-      
-      const startDay = bIn.getDate();
-      // คำนวณจำนวนคืนจริง เพื่อให้แถบยาวถูกต้อง
-      const nights = getNights(booking.check_in, booking.check_out);
-      
-      return (
-        <div 
-          key={booking.id}
-          onClick={(e) => { 
-            e.stopPropagation(); 
-            setSelectedBooking({...booking, room_no: room.room_no}); 
-            setIsDetailOpen(true); 
-          }}
-          className={`absolute h-10 mt-2 rounded-xl flex items-center justify-center cursor-pointer font-black shadow-xl z-[21] transition-all hover:scale-[1.01] border border-white/10 text-[10px] uppercase
-            ${booking.status === 'checked_in' ? 'bg-green-600 shadow-green-900/20' : 'bg-red-500 shadow-red-900/20'}`}
-          style={{
-            // คำนวณตำแหน่ง: Sidebar(200) + (วันเริ่ม-1 * กว้างช่อง) + ครึ่งช่อง(30)
-            left: `${200 + (startDay - 1) * 60 + 30}px`,
-            // ความกว้าง: จำนวนคืน * กว้างช่อง
-            width: `${nights * 60}px`,
-          }}
-        >
-          <span className="truncate px-2 text-white drop-shadow-md text-[14px] font-black tracking-tight">
-            {booking.customer_name}
-          </span>
-                    </div>
-                  );
-                })}
-              </div>
+      {/* TIMELINE GRID */}
+      <div className="overflow-x-auto border-2 border-white/10 rounded-[2rem] bg-[#111] shadow-[0_0_50px_rgba(0,0,0,0.5)]">
+        <div className="inline-block min-w-full">
+          
+          {/* วันที่ (Header) */}
+          <div className="flex bg-[#1a1a1a] sticky top-0 z-30 border-b-2 border-white/10">
+            <div className="w-56 p-5 text-[11px] font-black text-gray-500 uppercase tracking-[0.2em] sticky left-0 bg-[#1a1a1a] border-r-2 border-white/10">Room List</div>
+            {days.map(day => (
+              <div key={day} className="w-14 min-w-[3.5rem] h-14 flex items-center justify-center border-r border-white/5 text-xs font-black hover:bg-white/5 transition-colors cursor-default">{day}</div>
             ))}
           </div>
-        ))}
+
+          {/* แสดงผลตาม Room Type */}
+          {Object.entries(groupedRooms).map(([type, roomsInGroup]) => (
+            <div key={type}>
+              <div 
+                className="flex bg-gradient-to-r from-red-950/40 to-transparent border-b border-white/5 cursor-pointer hover:from-red-900/40 transition-all"
+                onClick={() => setExpandedGroups(prev => ({ ...prev, [type]: !prev[type] }))}
+              >
+                <div className="w-56 p-3 sticky left-0 z-20 bg-[#111]/80 backdrop-blur-md flex items-center gap-2 border-r-2 border-white/10">
+                  <span className="text-red-600 text-xs">{expandedGroups[type] ? '▼' : '▶'}</span>
+                  <span className="text-[10px] font-black text-red-500 uppercase tracking-widest">{type}</span>
+                </div>
+                <div className="flex-1 h-10"></div>
+              </div>
+
+              {expandedGroups[type] && roomsInGroup.map(room => (
+                <div key={room.id} className="flex border-b border-white/5 relative h-16 group">
+                  <div className="w-56 p-5 font-black text-gray-400 sticky left-0 bg-[#111] z-20 border-r-2 border-white/10 group-hover:text-white transition-colors uppercase italic">{room.room_no}</div>
+                  
+                  {days.map(day => {
+                    const isSelected = isSelecting && selection.roomId === room.id && day >= Math.min(selection.startDay, selection.endDay) && day <= Math.max(selection.startDay, selection.endDay);
+                    return (
+                      <div 
+                        key={day} 
+                        onMouseDown={() => handleMouseDown(room.id, day)} 
+                        onMouseEnter={() => handleMouseEnter(day)}
+                        className={`w-14 min-w-[3.5rem] border-r border-white/5 transition-all cursor-crosshair ${isSelected ? 'bg-red-600/40 border-red-600' : 'hover:bg-red-600/5'}`} 
+                      />
+                    );
+                  })}
+
+                  {bookings.filter(b => b.room_id === room.id).map(b => {
+                    const checkInDate = new Date(b.check_in);
+                    if (checkInDate.getMonth() !== currentMonth) return null;
+                    const checkOutDate = new Date(b.check_out);
+                    
+                    const start = checkInDate.getDate();
+                    const end = checkOutDate.getDate();
+                    const duration = end - start;
+                    const isCheckedIn = b.status === 'checked_in';
+
+                    return (
+                      <div 
+                        key={b.id}
+                        onClick={(e) => handleBookingClick(b, e)}
+                        className={`absolute h-10 top-3 rounded-lg z-10 flex items-center px-3 text-[10px] font-black uppercase shadow-xl border-l-4 truncate cursor-pointer hover:scale-[1.02] transition-all
+                          ${isCheckedIn 
+                            ? 'bg-green-500 text-white border-green-700' 
+                            : 'bg-white text-red-700 border-red-600'
+                          }`}
+                        style={{ left: `calc(14rem + ${(start - 1) * 3.5}rem + 4px)`, width: `calc(${duration * 3.5}rem - 8px)` }}
+                      >
+                        {b.customer_name} {isCheckedIn && "✓"}
+                      </div>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          ))}
+        </div>
       </div>
 
-      {/* --- MODAL รายละเอียด --- */}
+      {/* --- MODAL รายละเอียดการจอง --- */}
       {isDetailOpen && selectedBooking && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[999] backdrop-blur-md transition-all">
-          <div className="bg-[#1f1f1f] w-[400px] rounded-[2rem] border border-gray-800 overflow-hidden shadow-2xl animate-in fade-in zoom-in duration-200">
-            <div className={`p-6 text-center font-black text-xl tracking-tighter ${selectedBooking.status === 'checked_in' ? 'bg-green-600' : 'bg-red-500'}`}>
-              {selectedBooking.status === 'checked_in' ? 'IN HOUSE' : 'CONFIRMED'}
+        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[200] p-4 backdrop-blur-md">
+          <div className="bg-white rounded-[2.5rem] w-full max-w-md overflow-hidden shadow-2xl text-black animate-in zoom-in duration-200">
+            <div className={`${selectedBooking.status === 'checked_in' ? 'bg-green-600' : 'bg-red-600'} p-8 text-white transition-colors`}>
+              <p className="text-[10px] font-black uppercase tracking-widest opacity-60 mb-2">Customer Info</p>
+              <h2 className="text-4xl font-black italic uppercase">{selectedBooking.customer_name}</h2>
             </div>
-            <div className="p-8 space-y-5">
-              <div className="flex justify-between items-end border-b border-gray-800 pb-3">
-                <span className="text-gray-500 text-xs font-bold uppercase tracking-widest">Customer</span>
-                <span className="font-black text-lg">{selectedBooking.customer_name}</span>
+            
+            <div className="p-8 space-y-4">
+              <div className="flex justify-between border-b pb-2">
+                <span className="text-gray-400 font-bold uppercase text-[10px]">Status</span>
+                <span className={`font-black uppercase text-xs ${selectedBooking.status === 'checked_in' ? 'text-green-600' : 'text-red-600'}`}>
+                   {selectedBooking.status === 'checked_in' ? 'Checked In ✓' : 'Pending'}
+                </span>
               </div>
+              <div className="flex justify-between border-b pb-2">
+                <span className="text-gray-400 font-bold uppercase text-[10px]">Room</span>
+                <span className="font-black italic">{rooms.find(r => r.id === selectedBooking.room_id)?.room_no}</span>
+              </div>
+              <div className="flex justify-between border-b pb-2">
+                <span className="text-gray-400 font-bold uppercase text-[10px]">Check In / Out</span>
+                <span className="font-black text-xs">{selectedBooking.check_in} ➜ {selectedBooking.check_out}</span>
+              </div>
+              <div className="bg-gray-100 p-4 rounded-xl flex justify-between items-center">
+                <span className="text-gray-400 font-bold uppercase text-[10px]">Price</span>
+                <span className={`text-2xl font-black italic ${selectedBooking.status === 'checked_in' ? 'text-green-600' : 'text-red-600'}`}>
+                    {Number(selectedBooking.price).toLocaleString()} ฿
+                </span>
+              </div>
+            </div>
 
-              {/* เพิ่มจำนวนคืนตรงนี้ครับพี่ */}
-              <div className="flex justify-between items-end border-b border-gray-800 pb-3">
-                <span className="text-gray-500 text-xs font-bold uppercase tracking-widest text-orange-500">Stay Duration</span>
-                <span className="font-black text-lg text-orange-500 italic">{getNights(selectedBooking.check_in, selectedBooking.check_out)} Nights</span>
-              </div>
-
-              <div className="flex justify-between items-end border-b border-gray-800 pb-3">
-                <span className="text-gray-500 text-xs font-bold uppercase tracking-widest">Room No.</span>
-                <span className="font-black text-blue-400">{selectedBooking.room_no}</span>
-              </div>
-              <div className="flex justify-between items-end border-b border-gray-800 pb-3">
-                <span className="text-gray-500 text-xs font-bold uppercase tracking-widest">Stay Period</span>
-                <span className="font-bold text-sm text-gray-300">{selectedBooking.check_in} - {selectedBooking.check_out}</span>
-              </div>
-              <div className="flex justify-between items-end border-b border-gray-800 pb-3">
-                <span className="text-gray-500 text-xs font-bold uppercase tracking-widest">Total</span>
-                <span className="font-black text-xl text-yellow-500">{Number(selectedBooking.price).toLocaleString()} ฿</span>
-              </div>
-              
-              <div className="flex flex-col gap-3 pt-6">
-                {selectedBooking.status !== 'checked_in' && (
-                  <button onClick={() => handleCheckIn(selectedBooking.id)} className="w-full py-4 bg-green-600 hover:bg-green-500 rounded-2xl font-black transition-all shadow-lg active:scale-95">CHECK IN NOW</button>
-                )}
-                <div className="flex gap-2">
-                  <button onClick={() => handleDelete(selectedBooking.id)} className="flex-1 py-4 bg-orange-600/10 hover:bg-red-600 text-red-500 hover:text-white rounded-2xl font-bold transition-all text-xs">DELETE</button>
-                  <button onClick={() => setIsDetailOpen(false)} className="flex-1 py-4 bg-gray-800 hover:bg-gray-700 rounded-2xl font-bold transition-all text-gray-400 text-xs">CLOSE</button>
-                </div>
+            <div className="p-6 bg-gray-50 flex flex-col gap-3">
+              {selectedBooking.status !== 'checked_in' && (
+                <button 
+                  onClick={() => handleCheckIn(selectedBooking.id)}
+                  className="w-full bg-green-600 text-white py-4 rounded-2xl font-black uppercase tracking-widest hover:bg-green-700 transition-all shadow-lg active:scale-95 mb-2"
+                >
+                  Confirm Check-In
+                </button>
+              )}
+              <div className="flex justify-between items-center">
+                <button onClick={() => handleDeleteBooking(selectedBooking.id)} className="text-red-600 font-black uppercase text-[10px] hover:underline">Delete Booking</button>
+                <button onClick={() => setIsDetailOpen(false)} className="bg-black text-white px-10 py-3 rounded-xl font-black uppercase text-[10px]">Close</button>
               </div>
             </div>
           </div>
         </div>
       )}
 
-      {/* --- MODAL จองใหม่ --- */}
+      {/* MODAL จองใหม่ */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-black/90 flex items-center justify-center z-[999] backdrop-blur-sm">
-          <div className="bg-[#1a1a1a] p-8 rounded-[2rem] w-[400px] border border-red-500/30 shadow-2xl">
-            <h2 className="text-2xl font-black mb-6 text-red-500 tracking-tighter italic underline decoration-4">NEW BOOKING</h2>
-            <div className="space-y-4">
-              <input className="w-full bg-black/50 p-4 border border-gray-800 rounded-2xl outline-none focus:border-red-700 text-white placeholder:text-gray-700" placeholder="Customer Name" onChange={e => setNewBooking({...newBooking, customer_name: e.target.value})} />
-              <input className="w-full bg-black/50 p-4 border border-gray-800 rounded-2xl outline-none focus:border-red-700 text-white placeholder:text-gray-700" type="number" placeholder="Price" onChange={e => setNewBooking({...newBooking, price: e.target.value})} />
-              <textarea className="w-full bg-black/50 p-4 border border-gray-800 rounded-2xl outline-none focus:border-red-700 text-white h-24 placeholder:text-gray-700" placeholder="Note..." onChange={e => setNewBooking({...newBooking, note: e.target.value})} />
-              <div className="flex gap-3 pt-4">
-                <button className="flex-1 py-4 bg-gray-800 rounded-2xl font-bold text-gray-500 hover:text-white" onClick={() => setIsModalOpen(false)}>CANCEL</button>
-                <button className="flex-1 py-4 bg-red-600 hover:bg-red-500 rounded-2xl font-black shadow-lg shadow-red-900/20 active:scale-95" onClick={handleSaveBooking}>CREATE</button>
+        <div className="fixed inset-0 bg-black/95 flex items-center justify-center z-[100] p-4 backdrop-blur-xl animate-in fade-in duration-300">
+          <div className="bg-[#151515] rounded-[3rem] w-full max-w-6xl border-4 border-red-700 shadow-[0_0_100px_rgba(220,38,38,0.2)] overflow-hidden flex flex-col max-h-[90vh]">
+            <div className="bg-red-700 p-10 flex justify-between items-center">
+              <div>
+                <h2 className="text-5xl font-black italic text-white uppercase tracking-tighter">Group Booking</h2>
+                <p className="text-white/60 font-bold text-xs uppercase tracking-widest mt-2">Lanta Paradise Resort Management</p>
+              </div>
+              <input 
+                className="bg-white p-6 rounded-2xl w-[400px] outline-none text-black font-black text-xl placeholder:text-gray-400 shadow-2xl" 
+                placeholder="ชื่อลูกค้า (Customer Name)" 
+                value={customerName} 
+                onChange={e => setCustomerName(e.target.value)} 
+              />
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-10 space-y-6">
+              <div className="grid grid-cols-12 gap-4 px-6 text-[10px] font-black text-gray-500 uppercase tracking-widest">
+                <div className="col-span-4">เลือกห้องพัก</div>
+                <div className="col-span-2 text-center">วันเข้าพัก</div>
+                <div className="col-span-2 text-center">วันออก</div>
+                <div className="col-span-3 text-right">ราคาต่อห้อง</div>
+                <div className="col-span-1"></div>
+              </div>
+
+              {selectedRooms.map((row) => (
+                <div key={row.id} className="grid grid-cols-12 gap-4 bg-white/5 p-6 rounded-[2rem] items-center border border-white/5 hover:border-red-600/30 transition-all">
+                  <div className="col-span-4">
+                    <select 
+                      className="w-full bg-black/50 p-4 rounded-xl border border-white/10 text-sm font-bold outline-none focus:border-red-600 text-white" 
+                      value={row.actual_room_id} 
+                      onChange={e => updateRoomRow(row.id, 'actual_room_id', e.target.value)}
+                    >
+                      <option value="">-- เลือกห้องพัก --</option>
+                      {rooms.map(r => <option key={r.id} value={r.id}>{r.room_no} | {r.room_type}</option>)}
+                    </select>
+                  </div>
+                  <div className="col-span-2">
+                    <input type="date" className="w-full bg-black/50 p-4 rounded-xl border border-white/10 text-xs text-center font-bold text-white" value={row.check_in} onChange={e => updateRoomRow(row.id, 'check_in', e.target.value)} />
+                  </div>
+                  <div className="col-span-2">
+                    <input type="date" className="w-full bg-black/50 p-4 rounded-xl border border-white/10 text-xs text-center font-bold text-white" value={row.check_out} onChange={e => updateRoomRow(row.id, 'check_out', e.target.value)} />
+                  </div>
+                  <div className="col-span-3 relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-red-600 font-black">฿</span>
+                    <input 
+                      type="number" 
+                      className="w-full bg-black/50 pl-10 p-4 rounded-xl border border-white/10 text-right font-mono text-lg font-black text-white outline-none focus:border-red-600" 
+                      value={row.price} 
+                      onChange={e => updateRoomRow(row.id, 'price', e.target.value)} 
+                    />
+                  </div>
+                  <div className="col-span-1 text-right">
+                    <button onClick={() => setSelectedRooms(selectedRooms.filter(r => r.id !== row.id))} className="text-gray-600 hover:text-red-600 text-2xl transition-colors">✕</button>
+                  </div>
+                </div>
+              ))}
+
+              <button 
+                onClick={addExtraRoom} 
+                className="w-full py-6 border-4 border-dashed border-white/5 rounded-[2rem] text-gray-500 font-black hover:border-red-600/50 hover:text-red-600 transition-all uppercase tracking-widest text-sm"
+              >
+                + Add Another Room to this Group
+              </button>
+            </div>
+
+            <div className="p-10 bg-[#111] border-t-2 border-white/5 flex justify-between items-center">
+              <div className="text-5xl font-black italic text-white tracking-tighter">
+                TOTAL: <span className="text-red-600">{selectedRooms.reduce((sum, r) => sum + Number(r.price || 0), 0).toLocaleString()}</span> ฿
+              </div>
+              <div className="flex gap-6">
+                <button onClick={() => setIsModalOpen(false)} className="px-10 py-5 font-black text-gray-500 uppercase tracking-widest hover:text-white transition-colors">Cancel</button>
+                <button 
+                  onClick={handleSaveBooking} 
+                  className="bg-white text-red-700 px-16 py-5 rounded-2xl font-black text-2xl hover:bg-red-600 hover:text-white transition-all shadow-2xl active:scale-95 uppercase italic tracking-tighter"
+                >
+                  Confirm Booking
+                </button>
               </div>
             </div>
           </div>
